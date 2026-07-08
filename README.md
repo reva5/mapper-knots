@@ -6,7 +6,7 @@ Ball Mapper for knot theory: a Python implementation of the Ball Mapper algorith
 
 Ball Mapper summarizes a point cloud by building an overlapping cover with balls of fixed radius ε, then taking the **nerve** of that cover as a graph (or simplicial complex). Unlike classical Mapper, it needs no lens function—only a distance and ε.
 
-This repository has two layers:
+This repository has three components:
 
 1. **`ball_mapper.py`** — a standalone Ball Mapper implementation using GUDHI's `NerveComplex`.
 2. **`knotinfo_experiment/`** — an experiment runner that:
@@ -16,6 +16,7 @@ This repository has two layers:
    - scores alignment with concordance-order labels (ARI / NMI),
    - compares concordance subsets against matched complexity controls,
    - extracts collisions, extremal knots, and Ball Mapper figures.
+3. **`plot_numeric_bm.py`** — an interactive matplotlib explorer for Ball Mapper on numeric knot invariants (see below).
 
 Reference: Dłotko, [*Ball mapper: a shape summary for topological data analysis*](https://arxiv.org/abs/1901.07410) (arXiv:1901.07410).
 
@@ -98,6 +99,42 @@ python ball_mapper.py --eps 0.35 --n-points 200 --plot
 1. Select landmark centers until every point lies within ε of some center.
 2. Assign each point to the balls that cover it.
 3. Build the nerve with GUDHI's `NerveComplex`.
+
+## Interactive numeric explorer
+
+Explore Ball Mapper on scalar invariants from a KnotInfo numeric export:
+
+```
+data/knotnumericinvariants.csv
+```
+
+Run:
+
+```bash
+python plot_numeric_bm.py
+# or
+python plot_numeric_bm.py --csv data/knotnumericinvariants.csv --max-knots 800 --eps 1.5
+```
+
+The matplotlib window lets you:
+
+- pick **1–4 numeric invariants** (Signature, Genus-4D, τ, Nu samples, Epsilon, etc.),
+- set **ε** (ball radius in standardized units) and **max knots** (subsample cap; slider goes up to the full CSV size),
+- color nerve nodes by **Fibered** or **L-space** (blue = yes/Y, orange = no/N; uniform = gray),
+- toggle **|chiral|** for `|signature|`, `|τ|`, `|Rasmussen s|`, and Nu samples,
+- click **Compute** to refresh the graph, **Save PNG** to export.
+
+**Parsing notes:**
+
+- Exact numeric cells are used as features; KnotInfo **intervals** like `[2;3]` on scalar columns (Unknotting Number, Genus-4D, etc.) are treated as **missing**, not split into components.
+- Only the **Nu** column is parsed as a two-sample vector (`Nu[0]`, `Nu[1]`).
+- **Epsilon** in the CSV is Hom's knot Floer invariant ϵ ∈ {−1, 0, 1} — not the Ball Mapper radius slider.
+
+**Reading the graph:**
+
+- Each **node** is one ε-ball (landmark), not one knot; **size** ∝ knots in that ball.
+- **Layout** is an abstract spring layout of the nerve, not positions in invariant space.
+- Large ε on thousands of knots yields few landmarks — expected Ball Mapper behavior.
 
 ## Experiment design
 
@@ -206,6 +243,7 @@ run_experiment(config)
 ```
 mapper-knots/
 ├── ball_mapper.py              # Ball Mapper + circle demo CLI
+├── plot_numeric_bm.py          # Interactive explorer for numeric invariants
 ├── run_knotinfo_experiment.py  # Experiment entry point
 ├── knotinfo_experiment/
 │   ├── config.py               # ExperimentConfig and argparse
@@ -219,8 +257,9 @@ mapper-knots/
 │   ├── visualize.py            # Nerve graph figures
 │   └── runner.py               # Full experiment orchestration
 ├── data/
-│   └── knotinfo.csv            # Your local KnotInfo export (not bundled)
-├── output/                     # Generated results (gitignored recommended)
+│   ├── knotinfo.csv            # KnotInfo export for concordance experiment
+│   └── knotnumericinvariants.csv  # Numeric invariant export for interactive explorer
+├── output/                     # Generated results (gitignored)
 └── requirements.txt
 ```
 
