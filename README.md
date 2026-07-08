@@ -76,14 +76,18 @@ from ball_mapper import BallMapper
 
 X = np.random.randn(500, 3)
 bm = BallMapper(eps=1.0, method="greedy")
-result = bm.fit(X)
+result = bm.fit(X, color=X[:, 0])
 
 print(result.num_nodes, len(result.edges()))
 for simplex, _ in result.simplices():
     print(simplex)
+
+# Plot: for 2D data, point cloud + ε-balls + nerve graph; otherwise nerve only
+result.plot(show=True)
+result.plot(savepath="output/ball_mapper.png", show=False)
 ```
 
-Demo on a noisy circle:
+Demo on a noisy circle (same plot via CLI):
 
 ```bash
 python ball_mapper.py --eps 0.35 --n-points 200 --plot

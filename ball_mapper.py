@@ -16,14 +16,21 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from typing import Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from gudhi.cover_complex import NerveComplex
 from scipy.spatial.distance import cdist
 
+if TYPE_CHECKING:
+    import matplotlib.axes
+    import matplotlib.figure
 
 NetMethod = Literal["greedy", "maxmin"]
+
+MIN_NODE_SIZE = 35.0
+MAX_NODE_SIZE = 160.0
 
 
 def greedy_epsilon_net(distances: np.ndarray, eps: float) -> list[int]:
@@ -85,6 +92,32 @@ def build_cover_assignments(
     return assignments
 
 
+def _nerve_node_sizes(result: BallMapperResult, nodes: list) -> list[float]:
+    """Map ball populations to networkx node_size values."""
+    populations = [result.node_info[n]["size"] for n in nodes]
+    if not populations:
+        return []
+    min_pop = min(populations)
+    max_pop = max(populations)
+    if max_pop == min_pop:
+        mid = (MIN_NODE_SIZE + MAX_NODE_SIZE) / 2
+        return [mid] * len(populations)
+    scale = (MAX_NODE_SIZE - MIN_NODE_SIZE) / (max_pop - min_pop)
+    return [MIN_NODE_SIZE + (p - min_pop) * scale for p in populations]
+
+
+def _nerve_node_colors(result: BallMapperResult) -> list:
+    """Node colors from GUDHI's per-node averaged color values."""
+    import matplotlib.pyplot as plt
+
+    values = [result.node_info[n]["colors"][0] for n in result.node_info]
+    vmin, vmax = min(values), max(values)
+    if vmin == vmax:
+        return ["#4c72b0"] * len(values)
+    cmap = plt.cm.viridis
+    return [cmap((v - vmin) / (vmax - vmin)) for v in values]
+
+
 @dataclass
 class BallMapperResult:
     """Output of a Ball Mapper fit."""
@@ -95,6 +128,9 @@ class BallMapperResult:
     nerve: NerveComplex
     simplex_tree: object
     node_info: dict
+    data: np.ndarray
+    eps: float
+    point_colors: np.ndarray | None = None
 
     @property
     def num_nodes(self) -> int:
@@ -111,6 +147,154 @@ class BallMapperResult:
 
     def simplices(self) -> list[tuple[list[int], float]]:
         return list(self.simplex_tree.get_simplices())
+
+    def plot(
+        self,
+        *,
+        ax: matplotlib.axes.Axes | None = None,
+        figsize: tuple[float, float] = (10.0, 4.0),
+        seed: int = 0,
+        show: bool = False,
+        savepath: str | Path | None = None,
+        draw_balls: bool = True,
+        title: str | None = None,
+    ) -> tuple[matplotlib.figure.Figure, np.ndarray]:
+        """
+        Plot the input data and Ball Mapper nerve graph.
+
+        For 2D data, draws the point cloud, ε-net centers, optional covering
+        balls, and the nerve graph side by side. For higher-dimensional data,
+        only the nerve graph is shown (using the first two coordinates for a
+        scatter preview when *ax* is not passed).
+
+        Parameters
+        ----------
+        ax
+            If given, draw only the nerve graph on this axes. Otherwise create
+            a side-by-side data + nerve figure (or nerve-only when *d > 2*).
+        figsize
+            Figure size when creating a new figure.
+        seed
+            Random seed for the nerve graph spring layout.
+        show
+            Call ``plt.show()`` before returning.
+        savepath
+            If set, save the figure to this path.
+        draw_balls
+            Draw ε-radius circles around centers when data is 2D.
+        title
+            Optional suptitle for the figure.
+
+        Returns
+        -------
+        fig, axes
+            The matplotlib figure and axes array.
+        """
+        import matplotlib.pyplot as plt
+        import networkx as nx
+        from matplotlib.patches import Circle
+
+        G = nx.Graph()
+        G.add_nodes_from(self.node_info.keys())
+        G.add_edges_from(self.edges())
+
+        pos = nx.spring_layout(G, seed=seed) if G.number_of_nodes() else {}
+        node_sizes = _nerve_node_sizes(self, list(G.nodes()))
+        node_colors = _nerve_node_colors(self)
+
+        def _draw_nerve(target_ax: matplotlib.axes.Axes) -> None:
+            if G.number_of_nodes() == 0:
+                target_ax.set_title("Ball Mapper nerve graph (empty)")
+                target_ax.axis("off")
+                return
+            nx.draw_networkx(
+                G,
+                pos=pos,
+                node_color=node_colors,
+                node_size=node_sizes,
+                with_labels=False,
+                ax=target_ax,
+            )
+            target_ax.set_title(
+                f"Nerve graph ({self.num_nodes} balls, {len(self.edges())} edges)"
+            )
+            target_ax.axis("off")
+
+        if ax is not None:
+            fig = ax.figure
+            _draw_nerve(ax)
+            if title:
+                fig.suptitle(title)
+            if savepath:
+                fig.savefig(savepath, dpi=150, bbox_inches="tight")
+            if show:
+                plt.show()
+            return fig, np.array([ax])
+
+        d = self.data.shape[1]
+        show_data_panel = d <= 2
+
+        if show_data_panel:
+            fig, axes = plt.subplots(1, 2, figsize=figsize)
+            data_ax, nerve_ax = axes
+        else:
+            fig, nerve_ax = plt.subplots(figsize=(figsize[0] / 2, figsize[1]))
+            axes = np.array([nerve_ax])
+
+        if show_data_panel:
+            if d == 1:
+                data_ax.scatter(self.data[:, 0], np.zeros(len(self.data)), s=8, c="lightgray")
+                data_ax.scatter(
+                    self.centers[:, 0],
+                    np.zeros(len(self.centers)),
+                    s=40,
+                    c="crimson",
+                    label="ε-net centers",
+                )
+            else:
+                point_c = self.point_colors if self.point_colors is not None else "lightgray"
+                data_ax.scatter(
+                    self.data[:, 0], self.data[:, 1], s=8, c=point_c, alpha=0.7
+                )
+                data_ax.scatter(
+                    self.centers[:, 0],
+                    self.centers[:, 1],
+                    s=40,
+                    c="crimson",
+                    label="ε-net centers",
+                    zorder=3,
+                )
+                if draw_balls and d == 2:
+                    for center in self.centers:
+                        data_ax.add_patch(
+                            Circle(
+                                (center[0], center[1]),
+                                radius=self.eps,
+                                fill=False,
+                                edgecolor="crimson",
+                                linewidth=0.8,
+                                alpha=0.35,
+                            )
+                        )
+            data_ax.set_title(f"Point cloud (n={len(self.data)}, ε={self.eps})")
+            data_ax.set_aspect("equal", adjustable="datalim")
+            data_ax.legend(loc="best")
+
+        _draw_nerve(nerve_ax)
+
+        if title:
+            fig.suptitle(title)
+        fig.tight_layout()
+
+        if savepath:
+            path = Path(savepath)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(path, dpi=150, bbox_inches="tight")
+
+        if show:
+            plt.show()
+
+        return fig, axes
 
 
 class BallMapper:
@@ -197,6 +381,9 @@ class BallMapper:
             nerve=nerve,
             simplex_tree=nerve.simplex_tree_,
             node_info=nerve.node_info_,
+            data=X,
+            eps=self.eps,
+            point_colors=np.asarray(color) if color is not None else None,
         )
 
 
@@ -278,44 +465,11 @@ def main() -> None:
 
     if args.plot:
         try:
-            import matplotlib.pyplot as plt
-            import networkx as nx
+            result.plot(seed=args.seed, show=True)
         except ImportError as exc:
             raise SystemExit(
                 "Plotting requires matplotlib and networkx: pip install matplotlib networkx"
             ) from exc
-
-        G = nx.Graph()
-        G.add_nodes_from(result.node_info.keys())
-        G.add_edges_from(result.edges())
-
-        pos = nx.spring_layout(G, seed=args.seed)
-        node_colors = [result.node_info[n]["colors"][0] for n in G.nodes()]
-
-        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-        axes[0].scatter(X[:, 0], X[:, 1], s=8, c="lightgray", label="data")
-        axes[0].scatter(
-            result.centers[:, 0],
-            result.centers[:, 1],
-            s=40,
-            c="crimson",
-            label="ε-net centers",
-        )
-        axes[0].set_title("Point cloud and ε-net")
-        axes[0].set_aspect("equal")
-        axes[0].legend()
-
-        nx.draw_networkx(
-            G,
-            pos=pos,
-            node_color=node_colors,
-            cmap=plt.cm.viridis,
-            with_labels=False,
-            ax=axes[1],
-        )
-        axes[1].set_title("Ball Mapper nerve graph")
-        plt.tight_layout()
-        plt.show()
 
 
 if __name__ == "__main__":
