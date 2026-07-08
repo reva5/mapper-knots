@@ -6,7 +6,7 @@ Ball Mapper for knot theory: a Python implementation of the Ball Mapper algorith
 
 Ball Mapper summarizes a point cloud by building an overlapping cover with balls of fixed radius ε, then taking the **nerve** of that cover as a graph (or simplicial complex). Unlike classical Mapper, it needs no lens function—only a distance and ε.
 
-This repository has three components:
+This repository has four components:
 
 1. **`ball_mapper.py`** — a standalone Ball Mapper implementation using GUDHI's `NerveComplex`.
 2. **`knotinfo_experiment/`** — an experiment runner that:
@@ -17,6 +17,7 @@ This repository has three components:
    - compares concordance subsets against matched complexity controls,
    - extracts collisions, extremal knots, and Ball Mapper figures.
 3. **`plot_numeric_bm.py`** — an interactive matplotlib explorer for Ball Mapper on numeric knot invariants (see below).
+4. **`run_polyconc_bm.py`** — three separate Ball Mapper graphs on Alexander, Jones, and HOMFLYPT polynomial coefficients, colored by concordance order (see below).
 
 Reference: Dłotko, [*Ball mapper: a shape summary for topological data analysis*](https://arxiv.org/abs/1901.07410) (arXiv:1901.07410).
 
@@ -136,6 +137,59 @@ The matplotlib window lets you:
 - **Layout** is an abstract spring layout of the nerve, not positions in invariant space.
 - Large ε on thousands of knots yields few landmarks — expected Ball Mapper behavior.
 
+## Polynomial concordance graphs
+
+Build three **separate** Ball Mapper nerve graphs — one per polynomial — from a KnotInfo export with Alexander, Jones, and the **HOMFLY** column (HOMFLYPT in variables `v`, `z`):
+
+```
+data/knotpolyconc.csv
+```
+
+Each knot is a point in that polynomial's coefficient space (shared fixed exponent grid, zero-padded). Balls are colored by the **mode** concordance order among knots they cover. The same concordance color map is used across all three figures.
+
+Run:
+
+```bash
+python run_polyconc_bm.py
+# or tune ε per graph (standardized units by default):
+python run_polyconc_bm.py \
+  --eps-alexander 1.5 \
+  --eps-jones 2.0 \
+  --eps-homfly 2.5 \
+  --output-dir output
+```
+
+Options:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--csv` | `data/knotpolyconc.csv` | KnotInfo export path |
+| `--eps-alexander` | `1.5` | ε for Alexander graph |
+| `--eps-jones` | `2.0` | ε for Jones graph |
+| `--eps-homfly` | `2.5` | ε for HOMFLYPT graph |
+| `--standardize` / `--no-standardize` | standardize on | Z-score coefficient columns before Ball Mapper |
+| `--max-knots` | (all rows) | Optional head cap for quick tests |
+| `--seed` | `0` | Nerve layout seed |
+
+**Parsing notes:**
+
+- Uses the CSV **HOMFLY** column only (not any separate homflypt/links column).
+- Alexander, Jones, and the `v`-part of HOMFLYPT are **Laurent** polynomials (negative exponents, division form like `4/t^7`).
+- Alexander is symmetrized to Δ(t)=Δ(1/t) before coefficients are extracted (KnotInfo gives Δ up to ±t^k).
+- Each polynomial has its **own** exponent grid; features are **not** concatenated across polynomials.
+- Concordance labels come from **Concordance Order (Alg.)** when that is the exported column (or any header matching `concordance order`).
+
+**Outputs** (`output/figures/`):
+
+| File | Description |
+|---|---|
+| `polyconc_alexander_eps*.png` | Alexander coefficient Ball Mapper |
+| `polyconc_jones_eps*.png` | Jones coefficient Ball Mapper |
+| `polyconc_homfly_eps*.png` | HOMFLYPT coefficient Ball Mapper |
+| `polyconc_combined.png` | Side-by-side comparison |
+
+Knots that fail to parse or have missing polynomial values are excluded **per graph** and listed in `output/polyconc_parse_failures.csv` when any failures occur.
+
 ## Experiment design
 
 ### Feature pools
@@ -244,11 +298,14 @@ run_experiment(config)
 mapper-knots/
 ├── ball_mapper.py              # Ball Mapper + circle demo CLI
 ├── plot_numeric_bm.py          # Interactive explorer for numeric invariants
+├── run_polyconc_bm.py          # Alexander / Jones / HOMFLYPT polynomial graphs
 ├── run_knotinfo_experiment.py  # Experiment entry point
 ├── knotinfo_experiment/
 │   ├── config.py               # ExperimentConfig and argparse
 │   ├── columns.py              # Fuzzy CSV header → internal key mapping
 │   ├── parse.py                # Conservative numeric / order parsing
+│   ├── polynomials.py          # Laurent polynomial parsing + grids
+│   ├── polyconc.py             # Polynomial Ball Mapper pipeline
 │   ├── data.py                 # Load table, completeness, standardization
 │   ├── labels.py               # Ground-truth construction
 │   ├── subsets.py              # Subset enumeration + matched controls
@@ -258,7 +315,8 @@ mapper-knots/
 │   └── runner.py               # Full experiment orchestration
 ├── data/
 │   ├── knotinfo.csv            # KnotInfo export for concordance experiment
-│   └── knotnumericinvariants.csv  # Numeric invariant export for interactive explorer
+│   ├── knotnumericinvariants.csv  # Numeric invariant export for interactive explorer
+│   └── knotpolyconc.csv        # Polynomial + concordance export for polyconc graphs
 ├── output/                     # Generated results (gitignored)
 └── requirements.txt
 ```
